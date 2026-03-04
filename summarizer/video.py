@@ -4,11 +4,12 @@
 
 from __future__ import annotations
 
+import io
 import logging
 from dataclasses import dataclass
 from textwrap import dedent
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAI
 
 from bilibili.api import BiliAPI, VideoInfo
 
@@ -67,10 +68,14 @@ class VideoSummarizer:
         default_profile: LLMProfile,
         extra_profiles: dict[str, LLMProfile] | None = None,
         max_length: int = DEFAULT_MAX_LENGTH,
+        whisper_api_key: str = "",
+        whisper_max_duration: int = 1200,  # 最大转写时长（秒），默认 20 分钟
     ):
         self.api = api
         self.max_length = max_length
         self.default_profile = default_profile
+        self.whisper_api_key = whisper_api_key
+        self.whisper_max_duration = whisper_max_duration
         # name → profile, 用于按关键词切换
         self.profiles: dict[str, LLMProfile] = {}
         if extra_profiles:
@@ -91,12 +96,12 @@ class VideoSummarizer:
     async def summarize(self, bvid: str, profile: LLMProfile | None = None, overhead: int = 0) -> str | None:
         """对一个视频生成总结文本。
 
-        新策略：统一走 LLM，收集所有可用素材作为上下文：
-          - CC 字幕（最优质素材）
-          - 弹幕（观众实时反应，几乎所有视频都有）
-          - B站 AI 摘要（作为辅助参考，不再直接返回）
-          - 标签
-          - 标题 + 简介 + UP主 + 时长
+        素材收集策略（优先级）：
+          1. CC 字幕（最优质素材）
+          2. 语音识别转写（Whisper，无字幕时自动触发）
+          3. 弹幕（观众实时反应，几乎所有视频都有）
+          4. B站 AI 摘要（作为辅助参考）
+          5. 标签 + 标题 + 简介 + UP主 + 时长
         """
         if profile is None:
             profile = self.default_profile
@@ -106,19 +111,37 @@ class VideoSummarizer:
             logger.warning("无法获取视频信息: %s", bvid)
             return None
 
-        # 并行获取所有素材
+        # 获取 cid
         cid = await self.api.get_cid(bvid)
 
         # 收集各类素材
         subtitle_text = await self._fetch_subtitle(info)
+
+        # 如果没有 CC 字幕，尝试语音识别
+        whisper_text = ""
+        if not subtitle_text and self.whisper_api_key and cid:
+            if info.duration <= self.whisper_max_duration:
+                whisper_text = await self._transcribe_audio(bvid, cid)
+            else:
+                logger.info(
+                    "视频时长 %d 秒超过 Whisper 上限 %d 秒，跳过语音识别",
+                    info.duration,
+                    self.whisper_max_duration,
+                )
+
         danmaku_list = await self.api.get_danmaku(cid) if cid else []
         ai_summary = await self.api.get_ai_summary(bvid, info.aid, cid=cid)
         tags = await self.api.get_video_tags(bvid)
 
+        # 合并字幕源：CC 字幕优先，其次 Whisper
+        final_text = subtitle_text or whisper_text
+
         # 记录素材情况
         sources = []
         if subtitle_text:
-            sources.append(f"字幕({len(subtitle_text)}字)")
+            sources.append(f"CC字幕({len(subtitle_text)}字)")
+        elif whisper_text:
+            sources.append(f"语音识别({len(whisper_text)}字)")
         if danmaku_list:
             sources.append(f"弹幕({len(danmaku_list)}条)")
         if ai_summary:
@@ -136,7 +159,7 @@ class VideoSummarizer:
 
         return await self._llm_summarize(
             info,
-            subtitle_text=subtitle_text,
+            subtitle_text=final_text,
             danmaku_list=danmaku_list,
             ai_summary=ai_summary,
             tags=tags,
@@ -161,6 +184,40 @@ class VideoSummarizer:
             return ""
         text = await self.api.get_subtitle_text(url)
         return text
+
+    async def _transcribe_audio(self, bvid: str, cid: int) -> str:
+        """下载音频并通过 Whisper API 转写为文字。"""
+        try:
+            # 1) 获取音频 URL
+            audio_url = await self.api.get_audio_url(bvid, cid)
+            if not audio_url:
+                logger.info("无法获取音频流 URL: %s", bvid)
+                return ""
+
+            # 2) 下载音频
+            logger.info("开始下载音频进行语音识别: %s", bvid)
+            audio_data = await self.api.download_audio(audio_url)
+            if not audio_data:
+                return ""
+
+            # 3) 调用 Whisper API（同步，但实际是 IO 等待）
+            logger.info("调用 Whisper API 转写音频 (%.2f MB)…", len(audio_data) / 1024 / 1024)
+            client = OpenAI(api_key=self.whisper_api_key)
+            # 包装为类文件对象，文件名用 .m4a 让 API 识别格式
+            audio_file = io.BytesIO(audio_data)
+            audio_file.name = "audio.m4a"
+
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                response_format="text",
+            )
+            text = transcript.strip() if isinstance(transcript, str) else str(transcript).strip()
+            logger.info("语音识别完成: %d 字", len(text))
+            return text
+        except Exception:
+            logger.exception("语音识别失败: %s", bvid)
+            return ""
 
     def _format_bili_summary(self, summary: str, info: VideoInfo) -> str:
         """格式化B站自带的 AI 摘要（现在仅用于构建 prompt，不直接返回）。"""

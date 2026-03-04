@@ -39,6 +39,8 @@ class Config:
     bot_name: str
     poll_interval: int
     max_reply_length: int
+    whisper_enabled: bool
+    whisper_max_duration: int
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -65,4 +67,6 @@ class Config:
             bot_name=os.getenv("BOT_NAME", "总结姬"),
             poll_interval=int(os.getenv("POLL_INTERVAL", "30")),
             max_reply_length=int(os.getenv("MAX_REPLY_LENGTH", "800")),
+            whisper_enabled=os.getenv("WHISPER_ENABLED", "true").lower() in ("1", "true", "yes"),
+            whisper_max_duration=int(os.getenv("WHISPER_MAX_DURATION", "1200")),
         )

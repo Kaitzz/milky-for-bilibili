@@ -214,6 +214,58 @@ class BiliAPI:
             logger.exception("get_cid 异常")
             return 0
 
+    # ── 音频流 ──
+
+    async def get_audio_url(self, bvid: str, cid: int) -> str | None:
+        """获取视频最低码率的音频流 URL（DASH 格式）。"""
+        if cid == 0:
+            return None
+        client = await self._get_client()
+        try:
+            resp = await client.get(
+                f"{self.BASE}/x/player/playurl",
+                params={"bvid": bvid, "cid": cid, "fnval": 16},
+            )
+            data = resp.json()
+            if data.get("code") != 0:
+                logger.warning("获取 playurl 失败: %s", data.get("message"))
+                return None
+            audios = data.get("data", {}).get("dash", {}).get("audio", [])
+            if not audios:
+                return None
+            # 选最低码率（文件最小）
+            smallest = min(audios, key=lambda x: x["bandwidth"])
+            return smallest.get("baseUrl") or smallest.get("base_url")
+        except Exception:
+            logger.exception("get_audio_url 异常")
+            return None
+
+    async def download_audio(self, audio_url: str, max_mb: float = 24.0) -> bytes | None:
+        """下载音频流，超过 max_mb 则截断（Whisper API 限制 25MB）。"""
+        client = await self._get_client()
+        try:
+            # B站音频需要 Referer
+            resp = await client.get(
+                audio_url,
+                headers={"Referer": "https://www.bilibili.com/"},
+                timeout=120,
+            )
+            resp.raise_for_status()
+            content = resp.content
+            max_bytes = int(max_mb * 1024 * 1024)
+            if len(content) > max_bytes:
+                logger.warning(
+                    "音频文件过大 (%.1f MB)，截断到 %.0f MB",
+                    len(content) / 1024 / 1024,
+                    max_mb,
+                )
+                content = content[:max_bytes]
+            logger.info("音频下载完成: %.2f MB", len(content) / 1024 / 1024)
+            return content
+        except Exception:
+            logger.exception("download_audio 异常")
+            return None
+
     # ── 标签 ──
 
     async def get_video_tags(self, bvid: str) -> list[str]:

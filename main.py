@@ -187,6 +187,8 @@ async def main():
         default_profile=default_profile,
         extra_profiles=extra_profiles,
         max_length=cfg.max_reply_length,
+        whisper_api_key=cfg.openai_api_key if cfg.whisper_enabled else "",
+        whisper_max_duration=cfg.whisper_max_duration,
     )
 
     # 创建带 summarizer 绑定的回调
@@ -203,6 +205,7 @@ async def main():
 
     logger.info("Bot UID: %s", cfg.dedeuserid)
     logger.info("LLM 模型: %s", cfg.llm_model)
+    logger.info("Whisper 语音识别: %s (最大 %d 秒)", "开启" if cfg.whisper_enabled else "关闭", cfg.whisper_max_duration)
     logger.info("轮询间隔: %ds", cfg.poll_interval)
     logger.info("Bot 已就绪，开始监听 @消息...")
 
