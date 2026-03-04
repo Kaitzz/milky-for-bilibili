@@ -84,7 +84,7 @@ async def handle_mention(
     overhead = 70
 
     t0 = time.monotonic()
-    summary = await summarizer.summarize(bvid, profile=profile, overhead=overhead)
+    summary, used_asr = await summarizer.summarize(bvid, profile=profile, overhead=overhead)
     elapsed = time.monotonic() - t0
     if elapsed < 0.01:
         elapsed = 0.01  # fallback
@@ -103,11 +103,14 @@ async def handle_mention(
             f"{bot_name} 花了 {elapsed:.2f}秒 看完了视频，"
             f"为{teacher}总结如下："
         )
-    reply_text = (
-        f"{header}\n"
-        f"{summary}\n"
-        f"记得常找{bot_name}来玩哦！{heart}"
-    )
+    # 组装 footer
+    if used_asr:
+        asr_credit = f"\n本次总结利用了SiliconFlow提供的语音技术与{profile.display_name}。"
+    else:
+        asr_credit = ""
+    footer = f"\n记得随时呼叫{bot_name}哦！{heart}"
+
+    reply_text = f"{header}\n{summary}{asr_credit}{footer}"
 
     # 6) 确定回复参数
     #    oid = subject_id = 视频的 aid

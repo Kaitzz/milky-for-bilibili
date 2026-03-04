@@ -97,8 +97,12 @@ class VideoSummarizer:
                     logger.warning("用户要求 %s 但未配置 API Key，回退默认", profile.name)
         return self.default_profile
 
-    async def summarize(self, bvid: str, profile: LLMProfile | None = None, overhead: int = 0) -> str | None:
+    async def summarize(self, bvid: str, profile: LLMProfile | None = None, overhead: int = 0) -> tuple[str | None, bool]:
         """对一个视频生成总结文本。
+
+        返回 (summary_text, used_asr):
+          - summary_text: 总结文本，失败时为 None
+          - used_asr: 是否使用了语音识别
 
         素材收集策略（优先级）：
           1. CC 字幕（最优质素材）
@@ -113,7 +117,7 @@ class VideoSummarizer:
         info = await self.api.get_video_info(bvid)
         if info is None:
             logger.warning("无法获取视频信息: %s", bvid)
-            return None
+            return None, False
 
         # 获取 cid
         cid = await self.api.get_cid(bvid)
@@ -161,7 +165,9 @@ class VideoSummarizer:
         # 有效摘要长度 = 总限制 - header/footer 开销
         effective_max = self.max_length - overhead if overhead else self.max_length
 
-        return await self._llm_summarize(
+        used_asr = bool(whisper_text)
+
+        result = await self._llm_summarize(
             info,
             subtitle_text=final_text,
             danmaku_list=danmaku_list,
@@ -170,6 +176,7 @@ class VideoSummarizer:
             profile=profile,
             effective_max=effective_max,
         )
+        return result, used_asr
 
     # ── 内部方法 ──
 
