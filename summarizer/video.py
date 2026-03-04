@@ -88,7 +88,7 @@ class VideoSummarizer:
                     logger.warning("用户要求 %s 但未配置 API Key，回退默认", profile.name)
         return self.default_profile
 
-    async def summarize(self, bvid: str, profile: LLMProfile | None = None) -> str | None:
+    async def summarize(self, bvid: str, profile: LLMProfile | None = None, overhead: int = 0) -> str | None:
         """对一个视频生成总结文本。
 
         新策略：统一走 LLM，收集所有可用素材作为上下文：
@@ -131,6 +131,9 @@ class VideoSummarizer:
             ", ".join(sources) if sources else "仅标题+简介",
         )
 
+        # 有效摘要长度 = 总限制 - header/footer 开销
+        effective_max = self.max_length - overhead if overhead else self.max_length
+
         return await self._llm_summarize(
             info,
             subtitle_text=subtitle_text,
@@ -138,6 +141,7 @@ class VideoSummarizer:
             ai_summary=ai_summary,
             tags=tags,
             profile=profile,
+            effective_max=effective_max,
         )
 
     # ── 内部方法 ──
@@ -173,6 +177,7 @@ class VideoSummarizer:
         ai_summary: str = "",
         tags: list[str] | None = None,
         profile: LLMProfile | None = None,
+        effective_max: int = 0,
     ) -> str | None:
         """调用 LLM 生成总结——整合所有可用素材。"""
         if profile is None:
@@ -212,8 +217,9 @@ class VideoSummarizer:
 
         user_msg = "\n".join(parts)
 
+        summary_limit = effective_max if effective_max else self.max_length
         system_msg = SYSTEM_PROMPT.format(
-            max_length=self.max_length,
+            max_length=summary_limit,
             bot_name="视频总结助手",
         )
 
@@ -234,10 +240,32 @@ class VideoSummarizer:
             # 清理 Markdown 残留（B站评论不支持）
             body = body.replace("**", "")
             body = body.replace("__", "")
-            # 确保不超长
-            if len(body) > self.max_length:
-                body = body[:self.max_length - 3] + "……"
+            # 确保不超长：智能截断，在最近的句子边界处截断
+            if len(body) > summary_limit:
+                body = self._smart_truncate(body, summary_limit)
             return body
         except Exception:
             logger.exception("LLM 调用失败")
             return None
+
+    @staticmethod
+    def _smart_truncate(text: str, limit: int) -> str:
+        """在句子边界处智能截断，避免切断句子中间。"""
+        if len(text) <= limit:
+            return text
+
+        # 在 limit 位置往前找最近的句子结尾符
+        cut = text[:limit]
+        # 句子结尾：句号、感叹号、问号、换行
+        best = -1
+        for sep in ("。", "！", "？", "❗", "\n", "~", "）", ")"):
+            pos = cut.rfind(sep)
+            if pos > best:
+                best = pos
+
+        # 如果找到了合理的断点（至少保留 60% 内容）
+        if best > limit * 0.6:
+            return text[: best + 1].rstrip()
+
+        # 找不到好的断点就硬截断
+        return cut.rstrip() + "……"

@@ -77,8 +77,14 @@ async def handle_mention(
     profile = summarizer.resolve_profile(mention.source_content)
 
     # 4) 生成总结（计时）
+    #    先预估 header/footer 占用字数，让总结的有效长度更精确
+    teacher = first_char_teacher(mention.user_name)
+    heart = random.choice(HEART_EMOJIS)
+    #    header 最长情况（召唤模型）约 50 字，footer 约 15 字，加换行
+    overhead = 70
+
     t0 = time.monotonic()
-    summary = await summarizer.summarize(bvid, profile=profile)
+    summary = await summarizer.summarize(bvid, profile=profile, overhead=overhead)
     elapsed = time.monotonic() - t0
     if elapsed < 0.01:
         elapsed = 0.01  # fallback
@@ -87,8 +93,6 @@ async def handle_mention(
         summary = f"抱歉，暂时无法总结这个视频（{bvid}），可能是视频信息获取失败 😢"
 
     # 5) 组装回复
-    teacher = first_char_teacher(mention.user_name)
-    heart = random.choice(HEART_EMOJIS)
     if profile != summarizer.default_profile:
         header = (
             f"{bot_name}召唤了{profile.display_name}模型，"
