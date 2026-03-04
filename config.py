@@ -41,6 +41,9 @@ class Config:
     max_reply_length: int
     whisper_enabled: bool
     whisper_max_duration: int
+    whisper_base_url: str
+    whisper_api_key: str
+    whisper_model: str
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -69,4 +72,7 @@ class Config:
             max_reply_length=int(os.getenv("MAX_REPLY_LENGTH", "800")),
             whisper_enabled=os.getenv("WHISPER_ENABLED", "true").lower() in ("1", "true", "yes"),
             whisper_max_duration=int(os.getenv("WHISPER_MAX_DURATION", "1200")),
+            whisper_base_url=os.getenv("WHISPER_BASE_URL", "https://api.siliconflow.cn/v1"),
+            whisper_api_key=os.getenv("WHISPER_API_KEY", ""),
+            whisper_model=os.getenv("WHISPER_MODEL", "FunAudioLLM/SenseVoiceSmall"),
         )

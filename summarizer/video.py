@@ -69,12 +69,16 @@ class VideoSummarizer:
         extra_profiles: dict[str, LLMProfile] | None = None,
         max_length: int = DEFAULT_MAX_LENGTH,
         whisper_api_key: str = "",
+        whisper_base_url: str = "https://api.siliconflow.cn/v1",
+        whisper_model: str = "FunAudioLLM/SenseVoiceSmall",
         whisper_max_duration: int = 1200,  # 最大转写时长（秒），默认 20 分钟
     ):
         self.api = api
         self.max_length = max_length
         self.default_profile = default_profile
         self.whisper_api_key = whisper_api_key
+        self.whisper_base_url = whisper_base_url
+        self.whisper_model = whisper_model
         self.whisper_max_duration = whisper_max_duration
         # name → profile, 用于按关键词切换
         self.profiles: dict[str, LLMProfile] = {}
@@ -202,13 +206,13 @@ class VideoSummarizer:
 
             # 3) 调用 Whisper API（同步，但实际是 IO 等待）
             logger.info("调用 Whisper API 转写音频 (%.2f MB)…", len(audio_data) / 1024 / 1024)
-            client = OpenAI(api_key=self.whisper_api_key)
+            client = OpenAI(api_key=self.whisper_api_key, base_url=self.whisper_base_url)
             # 包装为类文件对象，文件名用 .m4a 让 API 识别格式
             audio_file = io.BytesIO(audio_data)
             audio_file.name = "audio.m4a"
 
             transcript = client.audio.transcriptions.create(
-                model="whisper-1",
+                model=self.whisper_model,
                 file=audio_file,
                 response_format="text",
             )

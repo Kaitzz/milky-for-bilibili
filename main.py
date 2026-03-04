@@ -187,7 +187,9 @@ async def main():
         default_profile=default_profile,
         extra_profiles=extra_profiles,
         max_length=cfg.max_reply_length,
-        whisper_api_key=cfg.openai_api_key if cfg.whisper_enabled else "",
+        whisper_api_key=cfg.whisper_api_key if cfg.whisper_enabled else "",
+        whisper_base_url=cfg.whisper_base_url,
+        whisper_model=cfg.whisper_model,
         whisper_max_duration=cfg.whisper_max_duration,
     )
 
