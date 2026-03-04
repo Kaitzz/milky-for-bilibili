@@ -316,6 +316,99 @@ class VideoSummarizer:
             logger.exception("LLM 调用失败")
             return None
 
+    # ── 笔记生成（Markdown 格式，用于邮件发送） ──
+
+    NOTES_SYSTEM_PROMPT = dedent("""\
+        你是一位专业的视频笔记整理助手。请根据提供的视频素材生成一份
+        结构清晰、内容详尽的 Markdown 格式笔记。
+
+        要求：
+        1. 使用规范的 Markdown 格式（标题、列表、加粗、引用等）
+        2. 笔记要有层次结构：大标题 → 小节 → 要点
+        3. 深入分析视频的核心观点、论据和结论，提取关键知识点
+        4. 如果有字幕，基于实际内容提炼，不要遗漏重要信息
+        5. 技术类视频保留专业术语和代码示例
+        6. 科普类视频用通俗语言，配合概念解释
+        7. 保留重要的外语术语并附中文解释
+        8. 弹幕中如果有价值的补充信息或纠错，可以单独列一节
+        9. 不要添加问候语、署名等无关内容
+        10. 只输出笔记正文，开头直接从内容开始
+        11. 尽量详尽，不要省略重要信息，长度不限
+    """)
+
+    async def generate_notes(self, bvid: str, profile: "LLMProfile | None" = None) -> tuple[str | None, bool]:
+        """生成 Markdown 格式的完整视频笔记。
+
+        返回 (markdown_text, used_asr)。
+        """
+        if profile is None:
+            profile = self.default_profile
+
+        info = await self.api.get_video_info(bvid)
+        if info is None:
+            logger.warning("无法获取视频信息: %s", bvid)
+            return None, False
+
+        cid = await self.api.get_cid(bvid)
+        subtitle_text = await self._fetch_subtitle(info)
+
+        whisper_text = ""
+        if not subtitle_text and self.whisper_api_key and cid:
+            if info.duration <= self.whisper_max_duration:
+                whisper_text = await self._transcribe_audio(bvid, cid)
+
+        danmaku_list = await self.api.get_danmaku(cid) if cid else []
+        ai_summary = await self.api.get_ai_summary(bvid, info.aid, cid=cid)
+        tags = await self.api.get_video_tags(bvid)
+        final_text = subtitle_text or whisper_text
+
+        used_asr = bool(whisper_text)
+
+        # 构建 prompt
+        parts: list[str] = []
+        parts.append(f"视频标题：{info.title}")
+        parts.append(f"UP主：{info.owner_name}")
+        parts.append(f"BV号：{info.bvid}")
+        duration_min = info.duration // 60
+        parts.append(f"时长：{duration_min} 分钟")
+        if info.desc:
+            parts.append(f"简介：{info.desc[:1000]}")
+        if tags:
+            parts.append(f"标签：{'、'.join(tags[:10])}")
+        if ai_summary:
+            parts.append(f"\n【B站AI摘要（仅供参考）】\n{ai_summary[:3000]}")
+        if final_text:
+            truncated = final_text[:15000]
+            if len(final_text) > 15000:
+                truncated += "\n……（字幕已截断）"
+            parts.append(f"\n【字幕内容】\n{truncated}")
+        if danmaku_list:
+            dm_sample = danmaku_list[:300]
+            dm_text = " | ".join(dm_sample)
+            if len(dm_text) > 3000:
+                dm_text = dm_text[:3000] + "……"
+            parts.append(f"\n【弹幕精选】\n{dm_text}")
+
+        user_msg = "\n".join(parts)
+
+        try:
+            client = profile.build_client()
+            logger.info("生成笔记: 调用 %s (%s)", profile.name, profile.model)
+            response = await client.chat.completions.create(
+                model=profile.model,
+                messages=[
+                    {"role": "system", "content": self.NOTES_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_msg},
+                ],
+                max_tokens=4000,
+                temperature=0.5,
+            )
+            result = response.choices[0].message.content or ""
+            return result.strip(), used_asr
+        except Exception:
+            logger.exception("笔记生成 LLM 调用失败")
+            return None, used_asr
+
     @staticmethod
     def _smart_truncate(text: str, limit: int) -> str:
         """在句子边界处智能截断，避免切断句子中间。"""

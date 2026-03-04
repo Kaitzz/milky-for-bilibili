@@ -45,6 +45,13 @@ class Config:
     whisper_api_key: str
     whisper_model: str
 
+    # 邮件（笔记发送）
+    smtp_host: str
+    smtp_port: int
+    smtp_user: str
+    smtp_password: str
+    email_enabled: bool
+
     @classmethod
     def from_env(cls) -> "Config":
         def _require(key: str) -> str:
@@ -75,4 +82,9 @@ class Config:
             whisper_base_url=os.getenv("WHISPER_BASE_URL", "https://api.siliconflow.cn/v1"),
             whisper_api_key=os.getenv("WHISPER_API_KEY", ""),
             whisper_model=os.getenv("WHISPER_MODEL", "FunAudioLLM/SenseVoiceSmall"),
+            smtp_host=os.getenv("SMTP_HOST", ""),
+            smtp_port=int(os.getenv("SMTP_PORT", "465")),
+            smtp_user=os.getenv("SMTP_USER", ""),
+            smtp_password=os.getenv("SMTP_PASSWORD", ""),
+            email_enabled=os.getenv("EMAIL_ENABLED", "false").lower() in ("1", "true", "yes"),
         )

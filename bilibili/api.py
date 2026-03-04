@@ -58,6 +58,7 @@ class BiliAPI:
     """B站 Web API 非官方封装（仅使用公开可访问的接口）。"""
 
     BASE = "https://api.bilibili.com"
+    VC_BASE = "https://api.vc.bilibili.com"
 
     def __init__(self, auth: BiliAuth):
         self.auth = auth
@@ -413,4 +414,76 @@ class BiliAPI:
                 return False
         except Exception:
             logger.exception("reply_comment 异常")
+            return False
+
+    # ── 私信 (DM) ──
+
+    async def fetch_dm_messages(self, talker_id: int, size: int = 20) -> list[dict]:
+        """获取与指定用户的私信消息列表（最新在前）。
+
+        返回列表中每项: {"sender_uid": int, "content": str, "timestamp": int}
+        """
+        client = await self._get_client()
+        try:
+            resp = await client.get(
+                f"{self.VC_BASE}/svr_sync/v1/svr_sync/fetch_session_msgs",
+                params={
+                    "talker_id": talker_id,
+                    "session_type": 1,
+                    "size": size,
+                    "sender_device_id": 1,
+                    "build": 0,
+                    "mobi_app": "web",
+                },
+            )
+            data = resp.json()
+            if data.get("code") != 0:
+                logger.warning("获取私信失败: %s", data.get("message"))
+                return []
+            messages = []
+            for msg in data.get("data", {}).get("messages", []):
+                if msg.get("msg_type") != 1:  # 只处理文字消息
+                    continue
+                try:
+                    content = json.loads(msg.get("content", "{}")).get("content", "")
+                except (json.JSONDecodeError, TypeError):
+                    content = ""
+                messages.append({
+                    "sender_uid": msg.get("sender_uid", 0),
+                    "content": content,
+                    "timestamp": msg.get("timestamp", 0),
+                })
+            return messages
+        except Exception:
+            logger.exception("fetch_dm_messages 异常")
+            return []
+
+    async def send_dm(self, receiver_id: int, text: str) -> bool:
+        """给指定用户发送一条文字私信。"""
+        import time as _time
+        client = await self._get_client()
+        try:
+            resp = await client.post(
+                f"{self.VC_BASE}/web_im/v1/web_im/send_msg",
+                data={
+                    "msg[sender_uid]": self.auth.dedeuserid,
+                    "msg[receiver_id]": receiver_id,
+                    "msg[receiver_type]": 1,
+                    "msg[msg_type]": 1,
+                    "msg[dev_id]": "web",
+                    "msg[timestamp]": int(_time.time()),
+                    "msg[content]": json.dumps({"content": text}),
+                    "csrf": self.auth.bili_jct,
+                    "csrf_token": self.auth.bili_jct,
+                },
+            )
+            data = resp.json()
+            if data.get("code") == 0:
+                logger.info("私信发送成功: receiver=%s", receiver_id)
+                return True
+            else:
+                logger.warning("私信发送失败: code=%s msg=%s", data.get("code"), data.get("message"))
+                return False
+        except Exception:
+            logger.exception("send_dm 异常")
             return False
