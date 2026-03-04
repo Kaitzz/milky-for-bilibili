@@ -204,8 +204,8 @@ class VideoSummarizer:
             if not audio_data:
                 return ""
 
-            # 3) 调用 Whisper API（同步，但实际是 IO 等待）
-            logger.info("调用 Whisper API 转写音频 (%.2f MB)…", len(audio_data) / 1024 / 1024)
+            # 3) 调用语音识别 API（同步，但实际是 IO 等待）
+            logger.info("调用语音识别: %s | 模型: %s | 音频 %.2f MB", self.whisper_base_url, self.whisper_model, len(audio_data) / 1024 / 1024)
             client = OpenAI(api_key=self.whisper_api_key, base_url=self.whisper_base_url)
             # 包装为类文件对象，文件名用 .m4a 让 API 识别格式
             audio_file = io.BytesIO(audio_data)

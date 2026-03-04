@@ -207,7 +207,10 @@ async def main():
 
     logger.info("Bot UID: %s", cfg.dedeuserid)
     logger.info("LLM 模型: %s", cfg.llm_model)
-    logger.info("Whisper 语音识别: %s (最大 %d 秒)", "开启" if cfg.whisper_enabled else "关闭", cfg.whisper_max_duration)
+    if cfg.whisper_enabled:
+        logger.info("Whisper 语音识别: 开启 | 服务: %s | 模型: %s | 最大 %d 秒", cfg.whisper_base_url, cfg.whisper_model, cfg.whisper_max_duration)
+    else:
+        logger.info("Whisper 语音识别: 关闭")
     logger.info("轮询间隔: %ds", cfg.poll_interval)
     logger.info("Bot 已就绪，开始监听 @消息...")
 
